@@ -1,0 +1,18 @@
+# APIキーが含まれるファイル（プロトタイプ）
+yuru_guide.html
+
+# APIキー管理ファイル
+secrets.toml
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# VSCode
+.vscode/
