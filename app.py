@@ -8,6 +8,8 @@ import folium
 import streamlit as st
 from streamlit_folium import st_folium
 
+from streamlit_js_eval import get_geolocation
+
 from services.groq_client import generate_speeches
 from services.ors_client import get_route
 from services.overpass_client import fetch_landmarks
@@ -73,6 +75,27 @@ header[data-testid="stHeader"],
 .speech-box  { border-radius: 14px; padding: 16px; margin: 10px 0; line-height: 1.85; }
 .speech-guide   { background: #f0fff4; border: 2px solid #52b788; }
 .speech-osekkai { background: #fff8e1; border: 2px solid #f9a825; }
+/* セカンダリボタン：非ホバー時を温かい黄色に */
+.stButton > button {
+    background-color: #fff8e1 !important;
+    border: 1.5px solid #f9a825 !important;
+    color: #1b4332 !important;
+}
+.stButton > button:hover {
+    background-color: #2d6a4f !important;
+    border-color: #2d6a4f !important;
+    color: #fdf6e3 !important;
+}
+/* プライマリボタン（ルート検索）は緑を維持 */
+.stButton > button[kind="primary"] {
+    background-color: #2d6a4f !important;
+    border-color: #2d6a4f !important;
+    color: #fdf6e3 !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background-color: #1b4332 !important;
+    border-color: #1b4332 !important;
+}
 /* iOS タッチ操作改善 */
 * { -webkit-tap-highlight-color: rgba(0,0,0,0) !important; }
 .stSelectbox > div { cursor: pointer !important; touch-action: manipulation; }
@@ -125,6 +148,7 @@ _DEFAULTS: dict = {
     "start_results": [],      # Nominatim 検索結果
     "goal_results": [],
     "map_center": [35.6895, 139.6917],  # デフォルト：東京
+    "gps_requested": False,  # GPS 取得リクエスト中フラグ
     "fitted_bounds": None,   # (s_lat, s_lng, g_lat, g_lng) fit_bounds 適用済みのピン組
     "p2_map_fitted": False,  # 2画面目 fit_bounds 適用済みフラグ
 }
@@ -167,11 +191,11 @@ st.markdown(
 </div>
 <div class="tagline-panel">
   <div style="font-size:0.75rem;color:#2d6a4f;line-height:1.85;margin-bottom:8px;">
-    「明日行くとこが初めてのとこだけど、駅からの歩き道がわからない」<br>
-    「最寄り駅まで来てみたけれど、ここからの道がわからない」<br>
-    そんな徒歩圏内の道で迷子になりそうな子猫ちゃんももう安心。
+    「今いるとこからお店までの道がわからないよ」<br>
+    「最寄り駅まで来たけど、ここからがわからん」<br>
+    そんな歩き道迷子になりかけ子猫ちゃんも大丈夫。
   </div>
-  🐾 犬のおまわりさんが、ゆるーく道案内するワン！
+  🐾 犬のおまわりさんが、道案内するワン！
 </div>
 """,
     unsafe_allow_html=True,
@@ -212,6 +236,30 @@ def page1() -> None:
         # 入力フォーム（Enter キーで検索）
         badge = _active_badge if ss.input_phase == "start" else ""
         st.markdown(f"**📍 スタート地点** {badge}", unsafe_allow_html=True)
+
+        # --- GPS ボタン ---
+        if not ss.gps_requested:
+            if st.button("📡 今いる場所をスタートにする", key="btn_gps", use_container_width=True):
+                ss.gps_requested = True
+                st.rerun()
+        else:
+            st.info("📡 ブラウザの位置情報許可を確認してワン🐾")
+            loc = get_geolocation()
+            if loc:
+                lat = loc["coords"]["latitude"]
+                lng = loc["coords"]["longitude"]
+                with st.spinner("住所を確認中..."):
+                    name = reverse_geocode(lat, lng)
+                ss.start = {"lat": lat, "lng": lng, "name": name}
+                ss.map_center = [lat, lng]
+                ss.input_phase = "both" if ss.goal else "goal"
+                ss.gps_requested = False
+                st.rerun()
+            if st.button("キャンセル", key="btn_gps_cancel"):
+                ss.gps_requested = False
+                st.rerun()
+
+        # --- テキスト検索フォーム ---
         with st.form("form_start", clear_on_submit=False):
             sq = st.text_input(
                 "スタート検索", key="sq_input",
@@ -240,14 +288,17 @@ def page1() -> None:
                 "スタート候補", range(len(opts)),
                 format_func=lambda i: opts[i], key="s_sel",
                 label_visibility="collapsed",
+                index=None,
+                placeholder="-- 選択するワン",
             )
-            if st.button("📍 ここをスタートに設定", key="btn_s_set", use_container_width=True):
-                chosen = ss.start_results[idx]
-                ss.start = {"lat": chosen["lat"], "lng": chosen["lng"], "name": chosen["name"]}
-                ss.map_center = [chosen["lat"], chosen["lng"]]
-                ss.input_phase = "both" if ss.goal else "goal"
-                ss.start_results = []
-                st.rerun()
+            if idx is not None:
+                if st.button("📍 ここをスタートに設定", key="btn_s_set", use_container_width=True):
+                    chosen = ss.start_results[idx]
+                    ss.start = {"lat": chosen["lat"], "lng": chosen["lng"], "name": chosen["name"]}
+                    ss.map_center = [chosen["lat"], chosen["lng"]]
+                    ss.input_phase = "both" if ss.goal else "goal"
+                    ss.start_results = []
+                    st.rerun()
         if ss.input_phase == "start":
             st.caption("📌 地図をタップして設定することもできるワン")
 
@@ -299,14 +350,17 @@ def page1() -> None:
                 "ゴール候補", range(len(opts)),
                 format_func=lambda i: opts[i], key="g_sel",
                 label_visibility="collapsed",
+                index=None,
+                placeholder="-- 選択するワン",
             )
-            if st.button("🏁 ここをゴールに設定", key="btn_g_set", use_container_width=True):
-                chosen = ss.goal_results[idx]
-                ss.goal = {"lat": chosen["lat"], "lng": chosen["lng"], "name": chosen["name"]}
-                ss.map_center = [chosen["lat"], chosen["lng"]]
-                ss.input_phase = "both" if ss.start else "goal"
-                ss.goal_results = []
-                st.rerun()
+            if idx is not None:
+                if st.button("🏁 ここをゴールに設定", key="btn_g_set", use_container_width=True):
+                    chosen = ss.goal_results[idx]
+                    ss.goal = {"lat": chosen["lat"], "lng": chosen["lng"], "name": chosen["name"]}
+                    ss.map_center = [chosen["lat"], chosen["lng"]]
+                    ss.input_phase = "both" if ss.start else "goal"
+                    ss.goal_results = []
+                    st.rerun()
         if ss.input_phase == "goal":
             st.caption("📌 地図をタップして設定することもできるワン")
 
