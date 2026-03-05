@@ -1,18 +1,31 @@
 """Groq へ渡すプロンプトの組み立て"""
 
 
+def _turn_label(instruction: str) -> str:
+    """ORS が生成した instruction テキストから方向ラベルを返す。
+    ORS は言語設定（ja）に基づいて instruction を生成するため、
+    型番号マッピングよりも信頼性が高い。"""
+    if "左" in instruction:
+        return "左折"
+    if "右" in instruction:
+        return "右折"
+    return "直進"
+
+
 def prioritize_steps(steps: list[dict]) -> list[dict]:
     """ステップに優先度・突き当たりタグを付与して返す
 
     - type 10（ゴール到着）/ 11（スタート）は除外済みを想定するが、念のためフィルタ
     - 優先度: 省略可（15m以下）/ 重要（前セグメント40m以上）/ 普通
-    - 突き当たり: 前セグメント100m以上 かつ 左右折
+    - 突き当たり: 前セグメント100m以上 かつ 左右折（instruction テキストで判定）
     """
     turn_steps = [s for s in steps if s.get("type") not in (10, 11)]
     result = []
     for i, s in enumerate(turn_steps):
         prev_dist = turn_steps[i - 1]["distance"] if i > 0 else 0
-        is_tsukiatari = prev_dist >= 100 and s.get("type") in (1, 2, 3, 5, 6, 7, 12, 13)
+        instr = s.get("instruction", "")
+        is_turn = "左" in instr or "右" in instr
+        is_tsukiatari = prev_dist >= 100 and is_turn
         if s["distance"] <= 15:
             priority = "省略可"
         elif prev_dist >= 40:
@@ -35,9 +48,10 @@ def _build_steps_text(steps_with_landmarks: list[dict]) -> str:
     lines = []
     for i, s in enumerate(prioritized):
         tsukiatari_tag = "【どん突き当たり】" if s["isTsukiatari"] else ""
+        turn_label = _turn_label(s["instruction"])
         line = (
             f"{i + 1}. 【{s['priority']}】{tsukiatari_tag}"
-            f"【{s['typeName']}】{s['instruction']}（約{s['distance']}m）"
+            f"【{turn_label}】{s['instruction']}（約{s['distance']}m）"
         )
         if s.get("crossingName"):
             line += f" ／ 交差点名：{s['crossingName']}"

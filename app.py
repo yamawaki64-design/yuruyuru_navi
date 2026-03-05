@@ -1,6 +1,8 @@
 """ゆるゆる道案内 - メインアプリ"""
+import base64
 from html import escape
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import folium
 import streamlit as st
@@ -32,12 +34,12 @@ html, body, [class*="css"] { font-family: 'Zen Maru Gothic', sans-serif !importa
 header[data-testid="stHeader"],
 [data-testid="stToolbar"] { display: none !important; }
 /* 固定ヘッダー分の余白 */
-.block-container { padding-top: 3rem !important; }
+.block-container { padding-top: 2rem !important; }
 /* 固定タイトルバー */
 .app-header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
     background: #2d6a4f; color: #fdf6e3;
-    padding: 5px 16px;
+    padding: 2px 16px;
     display: flex; align-items: center; gap: 8px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
@@ -71,35 +73,38 @@ header[data-testid="stHeader"],
 .speech-box  { border-radius: 14px; padding: 16px; margin: 10px 0; line-height: 1.85; }
 .speech-guide   { background: #f0fff4; border: 2px solid #52b788; }
 .speech-osekkai { background: #fff8e1; border: 2px solid #f9a825; }
-.rescue-box-top {
-    background: #f3f0ff; border: 2px solid #9b72cf;
-    border-bottom: none; border-radius: 14px 14px 0 0;
-    padding: 14px 16px 8px; margin: 10px 0 0;
-}
-.rescue-box-bottom {
-    background: #f3f0ff; border: 2px solid #9b72cf;
-    border-top: none; border-radius: 0 0 14px 14px;
-    height: 12px; margin: 0 0 10px;
-}
-/* rescue-box のボタン行：CSS ブリッジで枠内に見せる
-   stElementContainer が stMarkdown と stHorizontalBlock を個別にラップするため
-   隣接する stElementContainer をターゲットにする */
-div[data-testid="stElementContainer"]:has(.rescue-btn-anchor)
-+ div[data-testid="stElementContainer"] {
-    background: #f3f0ff !important;
-    border-left: 2px solid #9b72cf !important;
-    border-right: 2px solid #9b72cf !important;
-    padding: 0 12px 4px !important;
-    margin-top: 0 !important;
-}
-div[data-testid="stElementContainer"]:has(.rescue-btn-anchor)
-+ div[data-testid="stElementContainer"] > div {
-    background: #f3f0ff !important;
+/* iOS タッチ操作改善 */
+* { -webkit-tap-highlight-color: rgba(0,0,0,0) !important; }
+.stSelectbox > div { cursor: pointer !important; touch-action: manipulation; }
+.stSelectbox input { pointer-events: none; }
+[data-testid="stCustomComponentV1"] iframe {
+    pointer-events: all !important;
+    touch-action: pan-x pan-y !important;
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+# 背景画像（base64 で CSS に埋め込み）
+_bg_path = Path(__file__).parent / "assets" / "navi_background_1600x900.jpg"
+if _bg_path.exists():
+    _bg_b64 = base64.b64encode(_bg_path.read_bytes()).decode()
+    st.markdown(
+        f'<style>'
+        f'.stApp {{'
+        f'  background-image: url("data:image/jpeg;base64,{_bg_b64}");'
+        f'  background-size: cover;'
+        f'  background-position: center top;'
+        f'  background-repeat: no-repeat;'
+        f'}}'
+        f'.main .block-container {{'
+        f'  background: rgba(253, 246, 227, 0.90);'
+        f'  border-radius: 12px;'
+        f'}}'
+        f'</style>',
+        unsafe_allow_html=True,
+    )
 
 # ===========================
 # セッション初期化
@@ -120,7 +125,6 @@ _DEFAULTS: dict = {
     "start_results": [],      # Nominatim 検索結果
     "goal_results": [],
     "map_center": [35.6895, 139.6917],  # デフォルト：東京
-    "map_zoom": 17,
     "fitted_bounds": None,   # (s_lat, s_lng, g_lat, g_lng) fit_bounds 適用済みのピン組
     "p2_map_fitted": False,  # 2画面目 fit_bounds 適用済みフラグ
 }
@@ -161,7 +165,14 @@ st.markdown(
 <div class="app-header">
   <h1>🗺️ ゆるゆる道案内</h1>
 </div>
-<div class="tagline-panel">🐾 犬のおまわりさんが、ゆる〜く道案内するワン！</div>
+<div class="tagline-panel">
+  <div style="font-size:0.75rem;color:#2d6a4f;line-height:1.85;margin-bottom:8px;">
+    「明日行くとこが初めてのとこだけど、駅からの歩き道がわからない」<br>
+    「最寄り駅まで来てみたけれど、ここからの道がわからない」<br>
+    そんな徒歩圏内の道で迷子になりそうな子猫ちゃんももう安心。
+  </div>
+  🐾 犬のおまわりさんが、ゆるーく道案内するワン！
+</div>
 """,
     unsafe_allow_html=True,
 )
@@ -336,7 +347,8 @@ def page1() -> None:
         st.error(ss.ors_error)
 
     # --- 地図 ---
-    m = folium.Map(location=ss.map_center, zoom_start=ss.map_zoom, tiles="OpenStreetMap")
+    # zoom_start は固定値（毎 rerun で変化させると st_folium が再初期化してユーザーのズームが失われる）
+    m = folium.Map(location=ss.map_center, zoom_start=13, tiles="OpenStreetMap")
     # 両地点確定時: ピン組が変わった最初の1回だけ fit_bounds を適用
     if ss.start and ss.goal:
         _cur = (ss.start["lat"], ss.start["lng"], ss.goal["lat"], ss.goal["lng"])
@@ -377,13 +389,9 @@ def page1() -> None:
         m,
         use_container_width=True,
         height=360,
-        returned_objects=["last_clicked", "zoom"],
+        returned_objects=["last_clicked"],
         key="page1_map",
     )
-
-    # ズームを先に保存（クリック処理が rerun しても失われないよう）
-    if map_data and map_data.get("zoom"):
-        ss.map_zoom = map_data["zoom"]
 
     # --- クリック処理 ---
     if map_data and map_data.get("last_clicked"):
@@ -501,7 +509,7 @@ def page2() -> None:
         guide_html = escape(ss.guide_speech).replace("\n", "<br>")
         st.markdown(
             f'<div class="speech-box speech-guide">'
-            f"<b style='color:#2d6a4f;'>🗣️ 道案内セリフ</b>"
+            f"<b style='color:#2d6a4f;'>🗣️ 道案内するワン</b>"
             f"<p style='margin-top:8px;font-size:0.92rem;'>{guide_html}</p>"
             f"</div>",
             unsafe_allow_html=True,
@@ -512,44 +520,28 @@ def page2() -> None:
             osekkai_html = escape(ss.osekkai_speech).replace("\n", "<br>")
             st.markdown(
                 f'<div class="speech-box speech-osekkai">'
-                f"<b style='color:#e65100;'>🐾 おせっかいセリフ</b>"
+                f"<b style='color:#e65100;'>🐾 おせっかいするワン</b>"
                 f"<p style='margin-top:8px;font-size:0.92rem;'>{osekkai_html}</p>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
 
-        # ② 迷ったら？ボックス（ボタンを枠内に CSS ブリッジで表示）
+        # ② ボタン行
         gmap_url = (
             "https://www.google.com/maps/dir/?api=1"
             f"&origin={ss.start['lat']},{ss.start['lng']}"
             f"&destination={ss.goal['lat']},{ss.goal['lng']}"
             "&travelmode=walking"
         )
-        # 枠の上半分（ボーダー下なし・角丸上のみ）
-        st.markdown(
-            '<div class="rescue-box-top">'
-            "<b style='color:#5e35b1;'>🆘 迷ったら？</b>"
-            "<p style='font-size:0.82rem;color:#4a4a4a;margin:8px 0 4px;line-height:1.7;'>"
-            "もう一回おまわりさんに道案内してもらうワン！<br>"
-            "どうしても迷ったらGoogle Map先生に頼るワン！"
-            "</p></div>"
-            # CSS ブリッジ用アンカー（後続の stHorizontalBlock に背景・枠を適用）
-            "<span class='rescue-btn-anchor' style='display:none'></span>",
-            unsafe_allow_html=True,
-        )
-        # ③ ボタン行（CSS で枠内に見えるようにスタイル適用）
         rc1, rc2 = st.columns(2)
         with rc1:
-            if st.button("🐾 もう一回道案内してもらう", use_container_width=True):
-                # ③ 1画面目に戻る（スタート・ゴール・ルートは保持、セリフのみクリア）
+            if st.button("🐾 もう一回道案内するワン", use_container_width=True):
                 ss.guide_speech = None
                 ss.osekkai_speech = None
                 ss.page = 1
                 st.rerun()
         with rc2:
-            st.link_button("🗺️ Google Mapで確認する", gmap_url, use_container_width=True)
-        # 枠の下半分（ボーダー上なし・角丸下のみ）
-        st.markdown('<div class="rescue-box-bottom"></div>', unsafe_allow_html=True)
+            st.link_button("🗺️ Google Map先生に引き継ぐワン", gmap_url, use_container_width=True)
 
     # --- リセット ---
     st.markdown("---")
