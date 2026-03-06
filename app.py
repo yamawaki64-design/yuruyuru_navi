@@ -245,14 +245,25 @@ def page1() -> None:
         else:
             st.info("📡 ブラウザの位置情報許可を確認してワン🐾")
             loc = get_geolocation()
-            if loc:
-                lat = loc["coords"]["latitude"]
-                lng = loc["coords"]["longitude"]
-                with st.spinner("住所を確認中..."):
-                    name = reverse_geocode(lat, lng)
-                ss.start = {"lat": lat, "lng": lng, "name": name}
-                ss.map_center = [lat, lng]
-                ss.input_phase = "both" if ss.goal else "goal"
+            if loc and isinstance(loc, dict) and "coords" in loc:
+                try:
+                    lat = loc["coords"]["latitude"]
+                    lng = loc["coords"]["longitude"]
+                except (KeyError, TypeError):
+                    st.error("位置情報の取得に失敗したワン😢 テキスト入力で場所を入力してワン")
+                    ss.gps_requested = False
+                    st.rerun()
+                else:
+                    with st.spinner("住所を確認中..."):
+                        name = reverse_geocode(lat, lng)
+                    ss.start = {"lat": lat, "lng": lng, "name": name}
+                    ss.map_center = [lat, lng]
+                    ss.input_phase = "both" if ss.goal else "goal"
+                    ss.gps_requested = False
+                    st.rerun()
+            elif loc:
+                # coords キーがない（エラーレスポンスなど想定外の構造）
+                st.error("位置情報を取得できなかったワン😢 テキスト入力で場所を入力してワン")
                 ss.gps_requested = False
                 st.rerun()
             if st.button("キャンセル", key="btn_gps_cancel"):
